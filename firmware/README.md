@@ -1,7 +1,8 @@
 # Nixie driver board tester (Raspberry Pi Pico, C / pico-sdk)
 
 Firmware for testing the driver board: it switches the cathode transistors
-(MPSA42) and the anode optocouplers from a command line on the UART.
+(MPSA42) and the anode optocouplers from a command line over USB (the Pico
+shows up as a virtual serial port).
 
 * At power-up **every output is OFF**. Outputs go to their inactive level before
   anything else runs.
@@ -20,7 +21,6 @@ ever driven. Current board:
 |---------|-----------|----------------------------------------|
 | K0..K9  | GP6..GP15 | cathode transistors (MPSA42), digits 0..9 |
 | A0      | GP18      | anode optocoupler                      |
-| TX / RX | GP0 / GP1 | UART0 console, 115200 8N1              |
 
 Each pin has an `active_low` flag. `false` (the default) means GPIO high
 switches the element ON, which matches GPIO → resistor → MPSA42 base, or GPIO
@@ -48,20 +48,25 @@ cmake .. && make -j
 Options:
 
 * `-DPICO_BOARD=pico2`: build for Pico 2 (RP2350). The default is `pico`.
-* `-DNIXIE_STDIO_USB=ON`: also put the CLI on USB CDC, in addition to UART.
 
 Flash it by holding BOOTSEL while plugging in, then copy `build/nixie_tester.uf2`
 to the `RPI-RP2` drive.
 
 ## Connect
 
-Use a 3.3 V USB-UART adapter: adapter RX → GP0, adapter TX → GP1, and GND.
+Plug the Pico into the PC over USB. It shows up as a serial port: `/dev/ttyACM0`
+on Linux, `/dev/tty.usbmodem*` on macOS, or `COMx` on Windows. The baud rate
+doesn't matter.
 
 ```bash
-picocom -b 115200 /dev/ttyUSB0
+picocom /dev/ttyACM0
 ```
 
-(minicom, PuTTY and screen work too.) The **↑** key recalls the last command.
+(minicom, PuTTY and screen work too.) The banner and pin list are printed each
+time the port is opened. The **↑** key recalls the last command.
+
+The outputs keep their state if the terminal is closed. Use `alloff` before you
+disconnect.
 
 ## Commands
 

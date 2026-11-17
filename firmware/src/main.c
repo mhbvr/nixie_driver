@@ -1,7 +1,7 @@
 /*
  * Nixie driver board tester - Raspberry Pi Pico (RP2040 / RP2350)
  *
- * Simple command line on the UART (GP0 = TX, GP1 = RX, 115200 8N1) to switch
+ * Simple command line over USB (CDC virtual serial port) to switch
  * the cathode transistors (MPSA42) and anode optocouplers on/off, drive them
  * with hardware PWM, or cycle through them in round robin.
  *
@@ -14,6 +14,7 @@
 #include <strings.h>
 
 #include "outputs.h"
+#include "pico/stdio_usb.h"
 #include "pico/stdlib.h"
 #include "pins_config.h"
 
@@ -475,17 +476,24 @@ int main(void)
     out_init();
 
     stdio_init_all();
-    sleep_ms(100);
-    print_banner();
 
     char line[LINE_MAX_LEN];
     char last[LINE_MAX_LEN] = "";
     int  len = 0;
     int  esc = 0;           /* 0 none, 1 got ESC, 2 got ESC [ */
     bool prev_cr = false;
+    bool was_connected = false;
 
-    printf(PROMPT);
     for (;;) {
+        /* Print the banner each time a terminal opens the USB serial port. */
+        bool connected = stdio_usb_connected();
+        if (connected && !was_connected) {
+            sleep_ms(50);
+            print_banner();
+            printf(PROMPT "%.*s", len, line);
+        }
+        was_connected = connected;
+
         if (out_poll()) {
             printf("\r\n[round robin finished, pins off]\n" PROMPT "%.*s", len, line);
         }
