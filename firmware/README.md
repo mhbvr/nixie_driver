@@ -14,13 +14,12 @@ Firmware for testing the driver board: it switches the cathode transistors
 ## Pin map
 
 Edit `src/pins_config.h` to match the schematic. Only the pins listed there are
-ever driven. The defaults are placeholders:
+ever driven. Current board:
 
 | Name    | GPIO      | Function                               |
 |---------|-----------|----------------------------------------|
-| K0..K9  | GP2..GP11 | cathode transistors, digits 0..9       |
-| DP      | GP12      | decimal point cathode                  |
-| A0..A5  | GP16..GP21| anode optocouplers (one per tube)      |
+| K0..K9  | GP6..GP15 | cathode transistors (MPSA42), digits 0..9 |
+| A0      | GP18      | anode optocoupler                      |
 | TX / RX | GP0 / GP1 | UART0 console, 115200 8N1              |
 
 Each pin has an `active_low` flag. `false` (the default) means GPIO high
@@ -84,7 +83,7 @@ Argument formats:
 
 * **pins**: `K3`, `GP5`, `5`, `K0,K5,A1`, `K0-K9` (table order; `K9-K0` runs
   in reverse), `2-11` (GPIO range), `cathodes`, `anodes`, `all`. You can mix them:
-  `K0-K4,DP`.
+  `K0-K4,A0`.
 * **times**: `500` (ms by default), `500ms`, `200us`, `1.5s`. The minimum is
   20 µs. The off time can be `0`, which means no gap.
 * **freq**: `200`, `200hz`, `1k`, `2.5khz`, `1mhz`. At 125 MHz the range is
@@ -103,7 +102,7 @@ nixie> pwm A0 1k 30          # same tube dimmed by PWM on the anode
 nixie> on K8
 nixie> alloff
 nixie> on K0
-nixie> rr A0-A5 2ms 100us    # multiplex the anodes: digit 0 on all tubes
+nixie> rr K0-K9 2ms 100us    # fast scan through the digits
 nixie> rr K5 500 500 10      # blink K5 at 1 Hz, 10 times
 nixie> status
 ```
