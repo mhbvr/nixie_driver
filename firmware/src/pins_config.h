@@ -16,8 +16,8 @@
  *                true:  GPIO low = element ON (e.g. optocoupler LED wired
  *                from 3V3 to the GPIO).
  *
- * The values below are placeholders: 10 cathode transistors (digits 0..9),
- * one decimal-point transistor and 6 anode optocouplers (one per tube).
+ * Current board: 10 cathode transistors (MPSA42, digits 0..9) on GP6..GP15
+ * and one anode optocoupler on GP18.
  */
 #ifndef PINS_CONFIG_H
 #define PINS_CONFIG_H
@@ -39,24 +39,18 @@ typedef struct {
 
 static const pin_def_t PIN_TABLE[] = {
     /* name   gpio  group               active_low */
-    { "K0",    2,   PIN_GROUP_CATHODE,  false },
-    { "K1",    3,   PIN_GROUP_CATHODE,  false },
-    { "K2",    4,   PIN_GROUP_CATHODE,  false },
-    { "K3",    5,   PIN_GROUP_CATHODE,  false },
-    { "K4",    6,   PIN_GROUP_CATHODE,  false },
-    { "K5",    7,   PIN_GROUP_CATHODE,  false },
-    { "K6",    8,   PIN_GROUP_CATHODE,  false },
-    { "K7",    9,   PIN_GROUP_CATHODE,  false },
-    { "K8",   10,   PIN_GROUP_CATHODE,  false },
-    { "K9",   11,   PIN_GROUP_CATHODE,  false },
-    { "DP",   12,   PIN_GROUP_CATHODE,  false },
+    { "K0",    6,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 0 */
+    { "K1",    7,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 1 */
+    { "K2",    8,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 2 */
+    { "K3",    9,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 3 */
+    { "K4",   10,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 4 */
+    { "K5",   11,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 5 */
+    { "K6",   12,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 6 */
+    { "K7",   13,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 7 */
+    { "K8",   14,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 8 */
+    { "K9",   15,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 9 */
 
-    { "A0",   16,   PIN_GROUP_ANODE,    false },
-    { "A1",   17,   PIN_GROUP_ANODE,    false },
-    { "A2",   18,   PIN_GROUP_ANODE,    false },
-    { "A3",   19,   PIN_GROUP_ANODE,    false },
-    { "A4",   20,   PIN_GROUP_ANODE,    false },
-    { "A5",   21,   PIN_GROUP_ANODE,    false },
+    { "A0",   18,   PIN_GROUP_ANODE,    false },   /* anode optocoupler */
 };
 
 #define PIN_COUNT ((int)(sizeof(PIN_TABLE) / sizeof(PIN_TABLE[0])))

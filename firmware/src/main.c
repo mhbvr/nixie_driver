@@ -86,7 +86,7 @@ static const char *push(int *out, int max, int *n, int idx)
  *     K0-K9         range in table order (K9-K0 runs backwards)
  *     2-11          range of GPIO numbers (GPIOs not in the table are skipped)
  *     cathodes / anodes / all
- * Items can be combined: "K0-K4,DP,anodes".
+ * Items can be combined: "K0-K4,anodes".
  */
 static const char *parse_pin_list(const char *arg, int *out, int max, int *n)
 {
@@ -431,7 +431,7 @@ static void cmd_help(int argc, char **argv)
            "examples:\n"
            "  on A0              anode of tube 0 on\n"
            "  rr K0-K9 1s 200    count 0..9 on the tube, 1 s each, 200 ms dark gap\n"
-           "  rr A0-A5 2ms 100us multiplex anodes (2 ms each, 100 us blanking)\n"
+           "  rr K0-K9 2ms 100us fast scan through digits (2 ms each, 100 us blanking)\n"
            "  rr K5 500 500      blink K5 at 1 Hz\n"
            "  pwm A0 1k 30       anode 0 dimmed: 1 kHz, 30 %%\n"
            "  alloff             everything off\n");
