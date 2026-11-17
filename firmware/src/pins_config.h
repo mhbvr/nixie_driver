@@ -4,7 +4,7 @@
  * >>> EDIT THIS TABLE TO MATCH THE SCHEMATIC <<<
  *
  * Every pin the firmware touches must be listed here. Nothing else is driven,
- * so the UART pins (GP0/GP1 by default) and other GPIOs stay untouched.
+ * so all other GPIOs stay untouched.
  *
  *  name        - name used in the CLI (case-insensitive). Must not contain
  *                spaces, ',' or '-'.

@@ -12,8 +12,6 @@ set(CMAKE_C_STANDARD 11)
 
 pico_sdk_init()
 
-option(NIXIE_STDIO_USB "Also expose the CLI on USB CDC (in addition to UART)" OFF)
-
 add_executable(nixie_tester
     src/main.c
     src/outputs.c
@@ -27,12 +25,8 @@ target_link_libraries(nixie_tester
     hardware_clocks
 )
 
-# CLI on UART0: GP0 = TX, GP1 = RX, 115200 8N1
-pico_enable_stdio_uart(nixie_tester 1)
-if(NIXIE_STDIO_USB)
-    pico_enable_stdio_usb(nixie_tester 1)
-else()
-    pico_enable_stdio_usb(nixie_tester 0)
-endif()
+# CLI over USB CDC (virtual serial port) only; the UART is not used.
+pico_enable_stdio_usb(nixie_tester 1)
+pico_enable_stdio_uart(nixie_tester 0)
 
 pico_add_extra_outputs(nixie_tester)
