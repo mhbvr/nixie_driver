@@ -1,5 +1,5 @@
 /*
- * Nixie driver board tester - Raspberry Pi Pico (RP2040 / RP2350)
+ * Nixie driver board tester - Raspberry Pi Pico 2 (RP2350), also builds for Pico (RP2040)
  *
  * Simple command line over USB (CDC virtual serial port) to switch
  * the cathode transistors (MPSA42) and anode optocouplers on/off, drive them

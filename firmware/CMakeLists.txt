@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.13)
 
-# Board: pico (RP2040) by default. For Pico 2 use: cmake -DPICO_BOARD=pico2 ..
+# Board: pico2 (RP2350) by default. For the original Pico (RP2040) use:
+#   cmake -DPICO_BOARD=pico ..
 if(NOT DEFINED PICO_BOARD)
-    set(PICO_BOARD pico)
+    set(PICO_BOARD pico2)
 endif()
 
 include(pico_sdk_import.cmake)
