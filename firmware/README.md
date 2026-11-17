@@ -1,4 +1,4 @@
-# Nixie driver board tester (Raspberry Pi Pico, C / pico-sdk)
+# Nixie driver board tester (Raspberry Pi Pico 2, C / pico-sdk)
 
 Firmware for testing the driver board: it switches the cathode transistors
 (MPSA42) and the anode optocouplers from a command line over USB (the Pico
@@ -27,9 +27,11 @@ switches the element ON, which matches GPIO → resistor → MPSA42 base, or GPI
 → resistor → opto LED → GND. Set it to `true` for an opto LED wired from 3V3 to
 the GPIO.
 
-> Until the firmware starts, RP2040 GPIOs are inputs with weak pull-downs. A
-> 10k–100k pull-down on each transistor base / opto input keeps everything off
-> while the Pico resets or is being flashed.
+> Until the firmware starts, the GPIOs are inputs and are not driven. Put an
+> external 10k–100k pull-down on each transistor base / opto input so everything
+> stays off while the Pico resets or is being flashed. On the Pico 2 (RP2350)
+> this matters even more: because of erratum RP2350-E9, the internal pull-down
+> can't be relied on to hold an input low.
 
 ## Build
 
@@ -47,10 +49,11 @@ cmake .. && make -j
 
 Options:
 
-* `-DPICO_BOARD=pico2`: build for Pico 2 (RP2350). The default is `pico`.
+* `-DPICO_BOARD=pico`: build for the original Pico (RP2040). The default is
+  `pico2` (Pico 2, RP2350).
 
 Flash it by holding BOOTSEL while plugging in, then copy `build/nixie_tester.uf2`
-to the `RPI-RP2` drive.
+to the USB drive that appears (`RP2350` for Pico 2, `RPI-RP2` for the original Pico).
 
 ## Connect
 
@@ -91,9 +94,10 @@ Argument formats:
   `K0-K4,A0`.
 * **times**: `500` (ms by default), `500ms`, `200us`, `1.5s`. The minimum is
   20 µs. The off time can be `0`, which means no gap.
-* **freq**: `200`, `200hz`, `1k`, `2.5khz`, `1mhz`. At 125 MHz the range is
-  about 7.5 Hz to 62.5 MHz. Duty resolution is best at low frequencies, where it
-  goes up to 16 bit.
+* **freq**: `200`, `200hz`, `1k`, `2.5khz`, `1mhz`. On Pico 2 (150 MHz) the range
+  is about 9 Hz to 75 MHz. On the original Pico (125 MHz) it is about 7.5 Hz to
+  62.5 MHz. Duty resolution is best at low frequencies, where it goes up to
+  16 bit.
 * **duty**: `0`..`100`, optionally with `%`.
 * **cycles**: if it is omitted or `0`, the round robin runs forever.
 
