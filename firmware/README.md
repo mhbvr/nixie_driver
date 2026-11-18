@@ -59,7 +59,7 @@ to the USB drive that appears (`RP2350` for Pico 2, `RPI-RP2` for the original P
 
 Plug the Pico into the PC over USB. It shows up as a serial port: `/dev/ttyACM0`
 on Linux, `/dev/tty.usbmodem*` on macOS, or `COMx` on Windows. The baud rate
-doesn't matter.
+doesn't matter. The 1200-baud "reboot to BOOTSEL" trick of the SDK is disabled.
 
 ```bash
 picocom /dev/ttyACM0
@@ -70,6 +70,27 @@ time the port is opened. The **↑** key recalls the last command.
 
 The outputs keep their state if the terminal is closed. Use `alloff` before you
 disconnect.
+
+The on-board LED (GP25) blinks at 1 Hz while the firmware is running.
+
+### Troubleshooting: the Pico 2 goes back into BOOTSEL after copying the UF2
+
+The UF2 was built for the wrong chip, most often the original Pico (RP2040).
+The Pico 2 accepts the file, finds no valid RP2350 image and reboots back into
+the boot ROM drive.
+
+* The board setting is cached in `build/CMakeCache.txt`. A build directory
+  configured before the default changed to `pico2` keeps building for `pico`.
+  cmake now prints `nixie_tester: PICO_BOARD=..., PICO_PLATFORM=...` and a
+  warning if the target isn't RP2350. Fix it with a clean build:
+
+  ```bash
+  rm -rf build && mkdir build && cd build && cmake .. && make -j
+  ```
+
+* Check the UF2 itself: `picotool info -a build/nixie_tester.uf2` should report
+  `RP2350` / `rp2350-arm-s`.
+* Use pico-sdk 2.0 or newer. Older SDKs can't build for RP2350.
 
 ## Commands
 
