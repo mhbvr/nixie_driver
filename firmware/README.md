@@ -19,7 +19,10 @@ ever driven. Current board:
 
 | Name    | GPIO      | Function                               |
 |---------|-----------|----------------------------------------|
-| K0..K9  | GP6..GP15 | cathode transistors (MPSA42), digits 0..9 |
+| K0      | GP6       | cathode transistor (MPSA42), digit 0   |
+| K9      | GP7       | digit 9                                |
+| K8      | GP8       | digit 8                                |
+| K1..K7  | GP9..GP15 | digits 1..7                            |
 | A0      | GP18      | anode optocoupler                      |
 
 Each pin has an `active_low` flag. `false` (the default) means GPIO high
