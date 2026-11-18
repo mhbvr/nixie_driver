@@ -16,8 +16,8 @@
  *                true:  GPIO low = element ON (e.g. optocoupler LED wired
  *                from 3V3 to the GPIO).
  *
- * Current board: 10 cathode transistors (MPSA42, digits 0..9) on GP6..GP15
- * and one anode optocoupler on GP18.
+ * Current board: 10 cathode transistors (MPSA42) on GP6..GP15, wired to
+ * digits 0 9 8 1 2 3 4 5 6 7 in GPIO order, and one anode optocoupler on GP18.
  */
 #ifndef PINS_CONFIG_H
 #define PINS_CONFIG_H
@@ -39,16 +39,18 @@ typedef struct {
 
 static const pin_def_t PIN_TABLE[] = {
     /* name   gpio  group               active_low */
+    /* Kn = cathode of digit n. Listed in digit order so "K0-K9" counts
+     * 0..9; the GPIO wiring order is 0 9 8 1 2 3 4 5 6 7 (GP6..GP15). */
     { "K0",    6,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 0 */
-    { "K1",    7,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 1 */
-    { "K2",    8,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 2 */
-    { "K3",    9,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 3 */
-    { "K4",   10,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 4 */
-    { "K5",   11,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 5 */
-    { "K6",   12,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 6 */
-    { "K7",   13,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 7 */
-    { "K8",   14,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 8 */
-    { "K9",   15,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 9 */
+    { "K1",    9,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 1 */
+    { "K2",   10,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 2 */
+    { "K3",   11,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 3 */
+    { "K4",   12,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 4 */
+    { "K5",   13,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 5 */
+    { "K6",   14,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 6 */
+    { "K7",   15,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 7 */
+    { "K8",    8,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 8 */
+    { "K9",    7,   PIN_GROUP_CATHODE,  false },   /* MPSA42 base, digit 9 */
 
     { "A0",   18,   PIN_GROUP_ANODE,    false },   /* anode optocoupler */
 };

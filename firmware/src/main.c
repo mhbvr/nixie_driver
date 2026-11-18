@@ -462,10 +462,37 @@ static void execute(char *line)
     printf("unknown command '%s', type 'help'\n", argv[0]);
 }
 
+/* On-board LED (GP25 on Pico / Pico 2) blinks at 1 Hz while the firmware runs,
+ * unless that GPIO is used in the pin table. Not available on the W boards. */
+#ifdef PICO_DEFAULT_LED_PIN
+static bool g_led_ok;
+
+static void heartbeat_init(void)
+{
+    g_led_ok = find_by_gpio(PICO_DEFAULT_LED_PIN) < 0;
+    if (g_led_ok) {
+        gpio_init(PICO_DEFAULT_LED_PIN);
+        gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+    }
+}
+
+static void heartbeat(void)
+{
+    static absolute_time_t next;
+    if (g_led_ok && time_reached(next)) {
+        gpio_xor_mask(1u << PICO_DEFAULT_LED_PIN);
+        next = make_timeout_time_ms(500);
+    }
+}
+#else
+static void heartbeat_init(void) {}
+static void heartbeat(void) {}
+#endif
+
 static void print_banner(void)
 {
     printf("\n\n=== Nixie driver board tester ===\n"
-           "All outputs are OFF. Type 'help' for commands, Ctrl-C = all off.\n\n");
+           "Outputs are OFF at power-up. Type 'help' for commands, Ctrl-C = all off.\n\n");
     out_print_pins();
     printf("\n");
 }
@@ -474,6 +501,7 @@ int main(void)
 {
     /* Outputs to a safe state before anything else (stdio init can block). */
     out_init();
+    heartbeat_init();
 
     stdio_init_all();
 
@@ -485,6 +513,8 @@ int main(void)
     bool was_connected = false;
 
     for (;;) {
+        heartbeat();
+
         /* Print the banner each time a terminal opens the USB serial port. */
         bool connected = stdio_usb_connected();
         if (connected && !was_connected) {
