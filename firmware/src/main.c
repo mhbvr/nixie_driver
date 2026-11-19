@@ -13,6 +13,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "mux.h"
 #include "outputs.h"
 #include "pico/stdio_usb.h"
 #include "pico/stdlib.h"
@@ -374,11 +375,237 @@ static void cmd_rr(int argc, char **argv)
         printf(", forever ('rr stop' or 'alloff' to end)\n");
 }
 
+/* ------------------------------------------------------------------------ */
+/* Multiplexing: mxa / mx / mxrr                                             */
+/* ------------------------------------------------------------------------ */
+
+static bool all_digits(const char *s, size_t n)
+{
+    if (n == 0)
+        return false;
+    for (size_t i = 0; i < n; i++)
+        if (!isdigit((unsigned char)s[i]))
+            return false;
+    return true;
+}
+
+/* Tube: "0" / "1" (tube number) or the anode pin ("A0", "GP18", ...). */
+static int parse_tube(const char *s)
+{
+    if (all_digits(s, strlen(s))) {
+        long t = strtol(s, NULL, 10);
+        return t < MX_TUBES ? (int)t : -1;
+    }
+    int idx = find_pin(s);
+    return idx >= 0 ? mux_tube_from_pin(idx) : -1;
+}
+
+static void tube_error(const char *s)
+{
+    printf("error: unknown tube '%s' (0..%d or anode name", s, MX_TUBES - 1);
+    for (int t = 0; t < MX_TUBES; t++)
+        if (mux_anode_pin(t) >= 0)
+            printf(" %s", PIN_TABLE[mux_anode_pin(t)].name);
+    printf(")\n");
+}
+
+/* Cathode list for mx commands. Like a pin list, but a bare number is a digit:
+ * "5" -> K5, "0-9" -> K0-K9. Only cathode pins are accepted. */
+static const char *parse_cathodes(const char *arg, int *out, int max, int *n)
+{
+    char buf[2 * LINE_MAX_LEN];
+    size_t o = 0;
+    const char *item = arg;
+    const size_t plen = strlen(CATHODE_DIGIT_PREFIX);
+
+    while (*item) {
+        const char *end = strchr(item, ',');
+        size_t len = end ? (size_t)(end - item) : strlen(item);
+        const char *dash = memchr(item, '-', len);
+        bool num_a = all_digits(item, dash ? (size_t)(dash - item) : len);
+        bool num_b = dash && all_digits(dash + 1, len - (size_t)(dash - item) - 1);
+
+        if (o + len + 2 * plen + 2 >= sizeof buf)
+            return "cathode list too long";
+        if (num_a && (!dash || num_b)) {
+            memcpy(buf + o, CATHODE_DIGIT_PREFIX, plen);
+            o += plen;
+            size_t la = dash ? (size_t)(dash - item) : len;
+            memcpy(buf + o, item, la);
+            o += la;
+            if (dash) {
+                buf[o++] = '-';
+                memcpy(buf + o, CATHODE_DIGIT_PREFIX, plen);
+                o += plen;
+                memcpy(buf + o, dash + 1, len - la - 1);
+                o += len - la - 1;
+            }
+        } else {
+            memcpy(buf + o, item, len);
+            o += len;
+        }
+        if (!end)
+            break;
+        buf[o++] = ',';
+        item = end + 1;
+    }
+    buf[o] = '\0';
+
+    const char *err = parse_pin_list(buf, out, max, n);
+    if (err)
+        return err;
+    for (int i = 0; i < *n; i++) {
+        if (!mux_is_cathode(out[i])) {
+            snprintf(g_err, sizeof g_err, "%s is not a cathode", PIN_TABLE[out[i]].name);
+            return g_err;
+        }
+    }
+    return NULL;
+}
+
+static void note_if_mux_off(void)
+{
+    if (!mux_running())
+        printf("(multiplexing is not running - start it with mxa)\n");
+}
+
+/* mxa <freq> <duty1> <duty2> <delay>   |   mxa off */
+static void cmd_mxa(int argc, char **argv)
+{
+    if (argc == 2 && (strcasecmp(argv[1], "off") == 0 || strcasecmp(argv[1], "stop") == 0)) {
+        printf(mux_stop() ? "multiplexing stopped (tube selections kept)\n"
+                          : "multiplexing not running\n");
+        return;
+    }
+    if (argc != 5) {
+        printf("usage: mxa <freq> <duty1> <duty2> <delay>   e.g. mxa 200 40 40 100us\n"
+               "       mxa off\n"
+               "  duty1/duty2: on time of tube 0/1 in %% of the period\n"
+               "  delay: dark time between one anode off and the next anode on\n"
+               "  rule: duty1 + duty2 + 2*delay/period <= 100 %%\n");
+        return;
+    }
+    double freq, d1, d2;
+    uint32_t delay_us;
+    if (!parse_freq(argv[1], &freq)) {
+        printf("error: bad frequency '%s' (e.g. 200, 1k)\n", argv[1]);
+        return;
+    }
+    if (!parse_duty(argv[2], &d1) || !parse_duty(argv[3], &d2)) {
+        printf("error: bad duty (0..100, e.g. 40 or 12.5%%)\n");
+        return;
+    }
+    if (!parse_duration_us(argv[4], &delay_us, true)) {
+        printf("error: bad delay '%s' (e.g. 0, 100us, 1ms)\n", argv[4]);
+        return;
+    }
+    const char *err = mux_start(freq, d1, d2, delay_us);
+    if (err) {
+        printf("error: %s\n", err);
+        return;
+    }
+    mux_print_timing();
+}
+
+/* mx on <anode> <cathodes>   |   mx off <anode> [cathodes] */
+static void cmd_mx(int argc, char **argv)
+{
+    bool on = argc >= 2 && strcasecmp(argv[1], "on") == 0;
+    bool off = argc >= 2 && strcasecmp(argv[1], "off") == 0;
+    if (!((on && argc == 4) || (off && (argc == 3 || argc == 4)))) {
+        printf("usage: mx on <anode> <cathodes>     e.g. mx on 0 5   /  mx on A1 K3\n"
+               "       mx off <anode> [cathodes]    without cathodes: tube blank\n");
+        return;
+    }
+    int tube = parse_tube(argv[2]);
+    if (tube < 0) {
+        tube_error(argv[2]);
+        return;
+    }
+    if (off && argc == 3) {
+        mux_clear(tube);
+        printf("tube %d: nothing selected\n", tube);
+        return;
+    }
+    int idx[RR_MAX_STEPS], n = 0;
+    const char *err = parse_cathodes(argv[3], idx, RR_MAX_STEPS, &n);
+    if (!err)
+        err = mux_set(tube, idx, n, on);
+    if (err) {
+        printf("error: %s\n", err);
+        return;
+    }
+    printf("ok\n");
+    note_if_mux_off();
+}
+
+/* mxrr <anode> <cathodes> <on> [off] [cycles]   |   mxrr <anode> stop */
+static void cmd_mxrr(int argc, char **argv)
+{
+    if (argc == 3 && strcasecmp(argv[2], "stop") == 0) {
+        int tube = parse_tube(argv[1]);
+        if (tube < 0) {
+            tube_error(argv[1]);
+            return;
+        }
+        printf(mux_rr_stop(tube) ? "tube %d: mxrr stopped\n" : "tube %d: mxrr not running\n",
+               tube);
+        return;
+    }
+    if (argc < 4 || argc > 6) {
+        printf("usage: mxrr <anode> <cathodes> <on> [off] [cycles]   e.g. mxrr 1 0-9 1s\n"
+               "       mxrr <anode> stop\n");
+        return;
+    }
+    int tube = parse_tube(argv[1]);
+    if (tube < 0) {
+        tube_error(argv[1]);
+        return;
+    }
+    int idx[RR_MAX_STEPS], n = 0;
+    const char *err = parse_cathodes(argv[2], idx, RR_MAX_STEPS, &n);
+    if (err) {
+        printf("error: %s\n", err);
+        return;
+    }
+    uint32_t on_us, off_us = 0, cycles = 0;
+    if (!parse_duration_us(argv[3], &on_us, false)) {
+        printf("error: bad on time '%s' (e.g. 500, 500ms, 1s)\n", argv[3]);
+        return;
+    }
+    if (argc >= 5 && !parse_duration_us(argv[4], &off_us, true)) {
+        printf("error: bad off time '%s' (e.g. 0, 100, 100ms)\n", argv[4]);
+        return;
+    }
+    if (argc >= 6 && !parse_uint(argv[5], &cycles)) {
+        printf("error: bad cycle count '%s' (0 = forever)\n", argv[5]);
+        return;
+    }
+    err = mux_rr_start(tube, idx, n, on_us, off_us, cycles);
+    if (err) {
+        printf("error: %s\n", err);
+        return;
+    }
+    printf("tube %d mxrr:", tube);
+    for (int i = 0; i < n; i++)
+        printf(" %s", PIN_TABLE[idx[i]].name);
+    printf("\n  on ");
+    print_duration(on_us);
+    printf(", off ");
+    print_duration(off_us);
+    if (cycles)
+        printf(", %lu cycle(s)\n", (unsigned long)cycles);
+    else
+        printf(", forever ('mxrr %d stop' to end)\n", tube);
+    note_if_mux_off();
+}
+
 static void cmd_status(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
     out_print_status();
+    mux_print_status();
 }
 
 static void cmd_pins(int argc, char **argv)
@@ -406,6 +633,9 @@ static const cmd_t COMMANDS[] = {
     { "alloff", "x",    cmd_alloff, "",                               "everything off (also Ctrl-C)" },
     { "pwm",    NULL,   cmd_pwm,    "<pins> <freq> <duty> | <pins> off", "hardware PWM" },
     { "rr",     NULL,   cmd_rr,     "<pins> <on> [off] [cycles] | stop", "round robin" },
+    { "mxa",    NULL,   cmd_mxa,    "<freq> <duty1> <duty2> <delay> | off", "multiplex the 2 anodes" },
+    { "mx",     NULL,   cmd_mx,     "on|off <anode> <cathodes>",       "cathodes of a tube (mux)" },
+    { "mxrr",   NULL,   cmd_mxrr,   "<anode> <cathodes> <on> [off] [cyc]", "round robin on a tube (mux)" },
 };
 
 #define CMD_COUNT ((int)(sizeof(COMMANDS) / sizeof(COMMANDS[0])))
@@ -435,7 +665,17 @@ static void cmd_help(int argc, char **argv)
            "  rr K0-K9 2ms 100us fast scan through digits (2 ms each, 100 us blanking)\n"
            "  rr K5 500 500      blink K5 at 1 Hz\n"
            "  pwm A0 1k 30       anode 0 dimmed: 1 kHz, 30 %%\n"
-           "  alloff             everything off\n");
+           "  alloff             everything off\n"
+           "\n"
+           "multiplexing (2 tubes, shared cathodes; anode = 0/1 or A0/A1, bare number = digit):\n"
+           "  mxa 200 40 40 100us  A0 40 %%, 100 us dark, A1 40 %%, rest dark; 200 Hz\n"
+           "                       rule: duty1 + duty2 + 2*delay/period <= 100 %%\n"
+           "  mx on 0 5            show 5 on tube 0          mx off 0 5 / mx off 0\n"
+           "  mx on A1 K7          show 7 on tube 1\n"
+           "  mxrr 1 0-9 1s        tube 1 counts 0..9, tube 0 keeps its digit\n"
+           "  mxrr 0 9-0 500 100 2 tube 0 counts down twice, 100 ms blank between\n"
+           "  mxrr 1 stop          stop the round robin of tube 1\n"
+           "  mxa off              stop multiplexing (selections are kept)\n");
 }
 
 /* ======================================================================== */
@@ -501,6 +741,7 @@ int main(void)
 {
     /* Outputs to a safe state before anything else (stdio init can block). */
     out_init();
+    mux_init();
     heartbeat_init();
 
     stdio_init_all();
@@ -527,6 +768,10 @@ int main(void)
         if (out_poll()) {
             printf("\r\n[round robin finished, pins off]\n" PROMPT "%.*s", len, line);
         }
+        unsigned mx_done = mux_poll();
+        for (int t = 0; t < MX_TUBES; t++)
+            if (mx_done & (1u << t))
+                printf("\r\n[mxrr on tube %d finished, tube blank]\n" PROMPT "%.*s", t, len, line);
 
         int c = getchar_timeout_us(10000);
         if (c == PICO_ERROR_TIMEOUT)

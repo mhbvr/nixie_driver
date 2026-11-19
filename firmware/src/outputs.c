@@ -7,6 +7,7 @@
 #include "hardware/gpio.h"
 #include "hardware/pwm.h"
 #include "pico/stdlib.h"
+#include "mux.h"
 #include "pins_config.h"
 
 /* ------------------------------------------------------------------------ */
@@ -113,6 +114,8 @@ static const char *check_not_rr(int idx)
 {
     if (g_state[idx].mode == OUT_MODE_RR)
         return "pin is used by the running round robin (use 'rr stop' or 'alloff')";
+    if (g_state[idx].mode == OUT_MODE_MX)
+        return "pin is used by multiplexing (use 'mxa off' or 'alloff')";
     return NULL;
 }
 
@@ -328,6 +331,9 @@ const char *out_rr_start(const int *idx, int n,
     for (int i = 0; i < n; i++)
         if (!valid_idx(idx[i]))
             return "invalid pin";
+    for (int i = 0; i < n; i++)
+        if (g_state[idx[i]].mode == OUT_MODE_MX)
+            return "pin is used by multiplexing (use 'mxa off' or 'alloff')";
 
     out_rr_stop();
 
@@ -364,6 +370,8 @@ const char *out_rr_start(const int *idx, int n,
 
 void out_all_off(void)
 {
+    mux_all_off();
+
     if (rr.running) {
         cancel_alarm(rr.alarm);
         rr.running = false;
@@ -430,6 +438,9 @@ void out_print_status(void)
         case OUT_MODE_RR:
             printf("RR    %s\n", level_is_on(i) ? "lit" : "dark");
             break;
+        case OUT_MODE_MX:
+            printf("MX    multiplexing\n");
+            break;
         }
     }
     if (rr.running) {
@@ -441,4 +452,34 @@ void out_print_status(void)
         else
             printf("inf\n");
     }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Hooks for the multiplexer                                                 */
+/* ------------------------------------------------------------------------ */
+
+out_mode_t out_get_mode(int idx)
+{
+    return valid_idx(idx) ? g_state[idx].mode : OUT_MODE_OFF;
+}
+
+void out_claim(int idx, out_mode_t mode)
+{
+    if (!valid_idx(idx))
+        return;
+    make_plain(idx);
+    g_state[idx].mode = mode;
+}
+
+void out_release(int idx)
+{
+    if (!valid_idx(idx))
+        return;
+    drive(idx, false);
+    g_state[idx].mode = OUT_MODE_OFF;
+}
+
+void out_drive(int idx, bool on)
+{
+    drive(idx, on);
 }

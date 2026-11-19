@@ -28,6 +28,7 @@ endif()
 add_executable(nixie_tester
     src/main.c
     src/outputs.c
+    src/mux.c
 )
 
 target_compile_options(nixie_tester PRIVATE -Wall -Wextra)

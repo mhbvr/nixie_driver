@@ -16,6 +16,7 @@ typedef enum {
     OUT_MODE_ON,
     OUT_MODE_PWM,
     OUT_MODE_RR,
+    OUT_MODE_MX,          /* owned by the multiplexer (mux.c) */
 } out_mode_t;
 
 /* Drive every configured pin to its inactive level. Call first thing. */
@@ -46,5 +47,11 @@ bool out_poll(void);
 
 void out_print_status(void);
 void out_print_pins(void);
+
+/* Hooks for the multiplexer (mux.c). */
+out_mode_t out_get_mode(int idx);
+void out_claim(int idx, out_mode_t mode);   /* stop PWM, switch off, set mode */
+void out_release(int idx);                  /* switch off, mode = OFF         */
+void out_drive(int idx, bool on);           /* raw level, IRQ safe            */
 
 #endif /* OUTPUTS_H */
