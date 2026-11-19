@@ -48,7 +48,7 @@ static struct {
     volatile bool running;
     alarm_id_t    alarm;
     uint32_t      dur[4];            /* on0, gap0, on1, gap1 in us       */
-    uint32_t      seg_us[6];         /* on0, hold, idle0, on1, hold, idle1 */
+    uint32_t      seg_us[8];         /* on0, hold, idle0, pre, on1, hold, idle1, pre */
     volatile int  seg;               /* segment to start next            */
     uint32_t      period_us;
     double        freq;              /* actual                           */
@@ -59,6 +59,10 @@ static struct {
 
 /* Cathodes stay on this long after the anode is switched off. */
 static uint32_t g_hold_us = MX_DEFAULT_HOLD_US;
+
+/* Optional pre-discharge: all cathodes on (anodes off) for this long right
+ * before each tube turns on. 0 = disabled (default). */
+static uint32_t g_pre_us = 0;
 
 /* ------------------------------------------------------------------------ */
 /* Init / lookup                                                            */
@@ -182,12 +186,21 @@ static void cathodes_off(void)
     gpio_put_masked(g_cath_gpio_mask, g_cath_idle);
 }
 
+/* Pre-discharge (optional): all anodes are off; ground ALL cathodes so any
+ * charge left on the shared cathode lines drains before the next tube. */
+static void cathodes_all_on(void)
+{
+    gpio_put_masked(g_cath_gpio_mask, g_cath_idle ^ g_cath_gpio_mask);
+}
+
 /* Segment s starts now:
- *   0 = tube 0 on (cathodes, then anode)   3 = tube 1 on
- *   1 = tube 0 anode off, hold starts      4 = tube 1 anode off, hold starts
- *   2 = all cathodes off (idle)            5 = all cathodes off (idle)
- * Zero-length segments are applied and skipped in the same call. A negative
- * return value reschedules relative to the previous target (no drift). */
+ *   0 = tube 0 on (cathodes, then anode)   4 = tube 1 on
+ *   1 = tube 0 anode off, hold starts      5 = tube 1 anode off, hold starts
+ *   2 = all cathodes off (idle)            6 = all cathodes off (idle)
+ *   3 = pre-discharge before tube 1        7 = pre-discharge before tube 0
+ * Zero-length segments are applied and skipped in the same call; a zero-length
+ * pre-discharge (disabled) does nothing. A negative return value reschedules
+ * relative to the previous target (no drift). */
 static int64_t mx_alarm_cb(alarm_id_t id, void *user_data)
 {
     (void)id;
@@ -196,12 +209,12 @@ static int64_t mx_alarm_cb(alarm_id_t id, void *user_data)
     if (!mx.running)
         return 0;
 
-    for (int guard = 0; guard < 6; guard++) {
+    for (int guard = 0; guard < 8; guard++) {
         int      s = mx.seg;
         uint32_t d = mx.seg_us[s];
-        int      t = s / 3;
+        int      t = s / 4;
 
-        switch (s % 3) {
+        switch (s % 4) {
         case 0:
             if (d)
                 tube_light(t);
@@ -209,11 +222,15 @@ static int64_t mx_alarm_cb(alarm_id_t id, void *user_data)
         case 1:
             tube_anode_off(t);
             break;
-        default:
+        case 2:
             cathodes_off();
             break;
+        default:
+            if (d)
+                cathodes_all_on();
+            break;
         }
-        mx.seg = s == 5 ? 0 : s + 1;
+        mx.seg = (s + 1) & 7;
         if (d)
             return -(int64_t)d;
     }
@@ -249,7 +266,7 @@ static void all_dark(void)
 const char *mux_start(double freq_hz, double duty1_pct, double duty2_pct,
                       uint32_t delay_us)
 {
-    static char msg[112];
+    static char msg[176];
 
     if (g_init_err)
         return g_init_err;
@@ -297,18 +314,28 @@ const char *mux_start(double freq_hz, double duty1_pct, double duty2_pct,
                  (unsigned long)g_hold_us, (unsigned long)delay_us);
         return msg;
     }
-    uint32_t seg[6];
+    if (g_pre_us && g_hold_us + g_pre_us > delay_us) {
+        snprintf(msg, sizeof msg,
+                 "cathode hold (%lu us) + pre-discharge (%lu us) is longer than the delay "
+                 "(%lu us): use a longer delay or shorter 'mxhold' / 'mxpre'",
+                 (unsigned long)g_hold_us, (unsigned long)g_pre_us, (unsigned long)delay_us);
+        return msg;
+    }
+    uint32_t seg[8];
     seg[0] = dur[0];
     seg[1] = g_hold_us;
-    seg[2] = dur[1] - g_hold_us;
-    seg[3] = dur[2];
-    seg[4] = g_hold_us;
-    seg[5] = dur[3] - g_hold_us;               /* dur[3] >= delay >= hold */
+    seg[2] = dur[1] - g_hold_us - g_pre_us;
+    seg[3] = g_pre_us;
+    seg[4] = dur[2];
+    seg[5] = g_hold_us;
+    seg[6] = dur[3] - g_hold_us - g_pre_us;    /* dur[3] >= delay >= hold + pre */
+    seg[7] = g_pre_us;
 
-    static const char *seg_name[6] = { "tube 0 on time", "cathode hold", "delay - hold",
-                                       "tube 1 on time", "cathode hold",
-                                       "second gap - hold" };
-    for (int s = 0; s < 6; s++) {
+    const char *idle_name  = g_pre_us ? "delay - hold - pre" : "delay - hold";
+    const char *idle2_name = g_pre_us ? "second gap - hold - pre" : "second gap - hold";
+    const char *seg_name[8] = { "tube 0 on time", "cathode hold", idle_name, "pre-discharge",
+                                "tube 1 on time", "cathode hold", idle2_name, "pre-discharge" };
+    for (int s = 0; s < 8; s++) {
         if (seg[s] != 0 && seg[s] < MX_MIN_SEG_US) {
             snprintf(msg, sizeof msg,
                      "%s is %lu us, min %d us (use 0, a longer time or a lower frequency)",
@@ -337,7 +364,7 @@ const char *mux_start(double freq_hz, double duty1_pct, double duty2_pct,
 
     for (int s = 0; s < 4; s++)
         mx.dur[s] = dur[s];
-    for (int s = 0; s < 6; s++)
+    for (int s = 0; s < 8; s++)
         mx.seg_us[s] = seg[s];
     mx.period_us = p;
     mx.freq      = 1e6 / (double)p;
@@ -345,7 +372,7 @@ const char *mux_start(double freq_hz, double duty1_pct, double duty2_pct,
     mx.duty[0]   = duty1_pct;
     mx.duty[1]   = duty2_pct;
     mx.delay_us  = delay_us;
-    mx.seg       = 0;
+    mx.seg       = g_pre_us ? 7 : 0;        /* pre-discharge before the first tube */
     mx.running   = true;
 
     mx.alarm = add_alarm_in_us(MX_MIN_SEG_US, mx_alarm_cb, NULL, true);
@@ -379,6 +406,29 @@ const char *mux_set_hold(uint32_t hold_us)
         const char *err = mux_start(mx.freq_req, mx.duty[0], mx.duty[1], mx.delay_us);
         if (err) {
             g_hold_us = old;            /* keep running with the old value */
+            return err;
+        }
+    }
+    return NULL;
+}
+
+uint32_t mux_get_pre(void)
+{
+    return g_pre_us;
+}
+
+const char *mux_set_pre(uint32_t pre_us)
+{
+    if (pre_us != 0 && pre_us < MX_MIN_SEG_US)
+        return "pre-discharge must be 0 or at least 20 us";
+    if (pre_us > MX_MAX_HOLD_US)
+        return "pre-discharge must be at most 100 ms";
+    uint32_t old = g_pre_us;
+    g_pre_us = pre_us;
+    if (mx.running) {
+        const char *err = mux_start(mx.freq_req, mx.duty[0], mx.duty[1], mx.delay_us);
+        if (err) {
+            g_pre_us = old;             /* keep running with the old value */
             return err;
         }
     }
@@ -528,6 +578,9 @@ void mux_print_timing(void)
            (unsigned long)mx.dur[3]);
     printf("  cathodes stay on %lu us after each anode off, then all off (mxhold)\n",
            (unsigned long)g_hold_us);
+    if (g_pre_us)
+        printf("  pre-discharge: all cathodes on %lu us before each tube turns on (mxpre)\n",
+               (unsigned long)g_pre_us);
 }
 
 static void print_time(uint32_t us)

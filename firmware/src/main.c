@@ -532,6 +532,36 @@ static void cmd_mxhold(int argc, char **argv)
         mux_print_timing();
 }
 
+/* mxpre [time]: optional pre-discharge before each tube turns on */
+static void cmd_mxpre(int argc, char **argv)
+{
+    if (argc == 1) {
+        uint32_t p = mux_get_pre();
+        if (p)
+            printf("pre-discharge: all cathodes on %lu us before each tube\n", (unsigned long)p);
+        else
+            printf("pre-discharge: off\n");
+        return;
+    }
+    uint32_t us;
+    if (argc != 2 || (strcasecmp(argv[1], "off") == 0 ? (us = 0, false)
+                                                       : !parse_duration_us(argv[1], &us, true))) {
+        printf("usage: mxpre [time|off]   e.g. mxpre 50us, mxpre off (default off)\n");
+        return;
+    }
+    const char *err = mux_set_pre(us);
+    if (err) {
+        printf("error: %s\n", err);
+        return;
+    }
+    if (us)
+        printf("pre-discharge: all cathodes on %lu us before each tube\n", (unsigned long)us);
+    else
+        printf("pre-discharge: off\n");
+    if (mux_running())
+        mux_print_timing();
+}
+
 /* mx on <anode> <cathodes>   |   mx off <anode> [cathodes] */
 static void cmd_mx(int argc, char **argv)
 {
@@ -735,6 +765,7 @@ static const cmd_t COMMANDS[] = {
     { "rr",     NULL,   cmd_rr,     "<pins> <on> [off] [cycles] | stop", "round robin" },
     { "mxa",    NULL,   cmd_mxa,    "<freq> <duty1> <duty2> <delay> | off", "multiplex the 2 anodes" },
     { "mxhold", NULL,   cmd_mxhold, "[time]",                         "cathode hold after anode off" },
+    { "mxpre",  NULL,   cmd_mxpre,  "[time|off]",                     "pre-discharge before tube on" },
     { "mx",     NULL,   cmd_mx,     "on|off <anode> <cathodes>",       "cathodes of a tube (mux)" },
     { "mxrr",   NULL,   cmd_mxrr,   "<anode> <cathodes> <on> [off] [cyc]", "round robin on a tube (mux)" },
 };
@@ -773,6 +804,8 @@ static void cmd_help(int argc, char **argv)
            "                       on: cathodes then anode; off: anode, hold, cathodes\n"
            "  mxhold 50us          cathodes stay on 50 us after anode off (default 100 us,\n"
            "                       must be <= delay)\n"
+           "  mxpre 50us           optional: all cathodes on 50 us (anodes off) right before\n"
+           "                       each tube turns on; hold + pre <= delay (default off)\n"
            "                       rule: duty1 + duty2 + 2*delay/period <= 100 %%\n"
            "  mx on 0 5            show 5 on tube 0          mx off 0 5 / mx off 0\n"
            "  mx on A1 K7          show 7 on tube 1\n"
