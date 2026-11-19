@@ -6,10 +6,12 @@
  *   | tube 0 on      | gap   | tube 1 on      | gap (rest of period)  |
  *   | duty1 * period | delay | duty2 * period | >= delay              |
  *
- * At the start of a "tube on" segment that tube's anode is switched on first,
- * then the cathodes selected for it. At the start of a gap all cathodes are
- * switched off first, then the anode. So no cathode is ever on while no anode
- * is on, and during each gap (delay) every cathode and anode is off.
+ * At the start of a "tube on" segment the cathodes are set to only the ones
+ * selected for that tube, then its anode is switched on. At the start of a gap
+ * the anode is switched off first, then ALL cathodes are switched on. During
+ * every gap all anodes are off and all cathodes are on, which drains the
+ * residual charge of the anodes (anti-ghosting).
+ * Starting, retuning and stopping switch everything off: anodes, then cathodes.
  * Validity: duty1 + duty2 + 2 * delay / period <= 100 %.
  *
  * Each tube shows either a static set of cathodes (mx on / mx off) or its
