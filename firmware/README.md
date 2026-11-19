@@ -181,13 +181,14 @@ One period (`1/freq`) is split into four parts:
 | duty1 % * period |       | duty2 % * period |                           |
 ```
 
-* At the start of a tube's on time, the firmware switches on that tube's
-  cathodes first, then its anode.
-* At the end of the on time, it switches the anode off first, then all
-  cathodes.
-* During `delay` everything is dark, so a cathode never changes while an anode
-  is on. This prevents ghosting. Make `delay` long enough for the
-  optocouplers to switch off.
+* At the start of a tube's on time, the firmware switches its anode on first,
+  then that tube's cathodes, if any are selected.
+* At the end of the on time, it switches all cathodes off first, then the
+  anode.
+* So no cathode is ever on while both anodes are off. During `delay` every
+  cathode and anode is off, and the next anode turns on only after the delay.
+  Make `delay` long enough for the optocoupler of the previous anode to
+  switch fully off.
 * `mxa` checks that `duty1 + duty2 + 2 * delay / period <= 100 %`. It counts
   the delay twice because there are two anode changes per period. It also
   checks that every non-zero part is at least 20 µs long, and that the
