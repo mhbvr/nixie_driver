@@ -159,14 +159,14 @@ static void tube_light(int t)
     for (int i = 0; i < g_ncath; i++)
         if (m & (1u << i))
             val ^= g_cath_gpio_bit[i];          /* active level = !idle */
-    gpio_put_masked(g_cath_gpio_mask, val);     /* cathodes first ...   */
-    out_drive(g_anode[t], true);                /* ... then the anode   */
+    out_drive(g_anode[t], true);                /* anode first ...      */
+    gpio_put_masked(g_cath_gpio_mask, val);     /* ... then cathodes    */
 }
 
 static void tube_dark(int t)
 {
-    out_drive(g_anode[t], false);               /* anode first ...      */
-    gpio_put_masked(g_cath_gpio_mask, g_cath_idle);  /* ... then cathodes */
+    gpio_put_masked(g_cath_gpio_mask, g_cath_idle);  /* cathodes first ... */
+    out_drive(g_anode[t], false);               /* ... then the anode   */
 }
 
 /* Segment s starts now: 0 = tube 0 on, 1 = gap, 2 = tube 1 on, 3 = gap.
@@ -212,9 +212,9 @@ static void mx_cancel(void)
 
 static void all_dark(void)
 {
+    gpio_put_masked(g_cath_gpio_mask, g_cath_idle);   /* cathodes first */
     for (int t = 0; t < MX_TUBES; t++)
         out_drive(g_anode[t], false);
-    gpio_put_masked(g_cath_gpio_mask, g_cath_idle);
 }
 
 const char *mux_start(double freq_hz, double duty1_pct, double duty2_pct,
@@ -281,12 +281,14 @@ const char *mux_start(double freq_hz, double duty1_pct, double duty2_pct,
     if (rr_stopped)
         out_rr_stop();
 
+    /* Cathodes off before anodes, also when retuning or taking over pins
+     * that were switched on by hand. */
     mx_cancel();
-    for (int t = 0; t < MX_TUBES; t++)
-        out_claim(g_anode[t], OUT_MODE_MX);
+    all_dark();
     for (int i = 0; i < g_ncath; i++)
         out_claim(g_cath[i], OUT_MODE_MX);
-    all_dark();
+    for (int t = 0; t < MX_TUBES; t++)
+        out_claim(g_anode[t], OUT_MODE_MX);
 
     for (int s = 0; s < 4; s++)
         mx.dur[s] = dur[s];
@@ -301,10 +303,10 @@ const char *mux_start(double freq_hz, double duty1_pct, double duty2_pct,
     mx.alarm = add_alarm_in_us(MX_MIN_SEG_US, mx_alarm_cb, NULL, true);
     if (mx.alarm <= 0) {
         mx.running = false;
-        for (int t = 0; t < MX_TUBES; t++)
-            out_release(g_anode[t]);
         for (int i = 0; i < g_ncath; i++)
             out_release(g_cath[i]);
+        for (int t = 0; t < MX_TUBES; t++)
+            out_release(g_anode[t]);
         return "no free hardware alarm";
     }
     if (rr_stopped)
@@ -318,10 +320,10 @@ bool mux_stop(void)
         return false;
     mx_cancel();
     all_dark();
-    for (int t = 0; t < MX_TUBES; t++)
-        out_release(g_anode[t]);
     for (int i = 0; i < g_ncath; i++)
         out_release(g_cath[i]);
+    for (int t = 0; t < MX_TUBES; t++)
+        out_release(g_anode[t]);
     return true;
 }
 
