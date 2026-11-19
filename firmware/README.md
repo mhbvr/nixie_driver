@@ -168,6 +168,7 @@ number in a cathode list is a digit, so `5` means `K5` and `0-9` means `K0-K9`.
 | `mxa <freq> <duty1> <duty2> <delay>` | start multiplexing (or retune it while it runs) |
 | `mxa off` | stop multiplexing. The tube selections are kept |
 | `mxhold [time]` | how long the cathodes stay on after the anode goes off (default 100 µs, `0` = none, must be ≤ delay). Without an argument it shows the current value |
+| `mxpre [time\|off]` | optional pre-discharge: all cathodes on (anodes off) for this long right before each tube turns on. Default off; hold + pre must be ≤ delay. Without an argument it shows the current value |
 | `mx on <anode> <cathodes>` | switch cathode(s) on for that tube |
 | `mx off <anode> <cathodes>` | switch cathode(s) off for that tube |
 | `mx off <anode>` | blank the tube (also stops its `mxrr`) |
@@ -207,6 +208,15 @@ A1  _______________________________________________________/‾‾‾‾‾
   anode. `mxhold` applies immediately while multiplexing runs.
 * Starting, retuning and stopping (`mxa`, `mxa off`, `alloff`) use the same
   steps: anodes off, hold, cathodes off.
+* **Optional pre-discharge (`mxpre`, off by default):** at the end of each
+  idle, right before a tube turns on, all cathodes are switched on for the
+  set time while both anodes stay off. The next tube then selects its own
+  cathodes (the others go off) and switches on its anode. This drains charge
+  left on the shared, floating cathode lines. Sequence:
+  `anode off → hold → idle (all off) → all cathodes on (pre) → tube's cathodes → anode on`.
+  Hold + pre must fit in the delay, and the pre-discharge also runs before the
+  first tube after `mxa`. With `mxpre off` the timing is exactly as without
+  this feature.
 * `mxa` checks that `duty1 + duty2 + 2 * delay / period <= 100 %`. It counts
   the delay twice because there are two anode changes per period. It also
   checks that every non-zero part is at least 20 µs long, including the hold

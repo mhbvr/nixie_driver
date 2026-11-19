@@ -45,6 +45,12 @@ bool mux_stop(void);              /* true if it was running; selections kept */
  * Applied immediately if multiplexing runs; must not exceed the delay. */
 const char *mux_set_hold(uint32_t hold_us);
 uint32_t    mux_get_hold(void);
+
+/* Optional pre-discharge: all cathodes on (all anodes off) for pre_us at the
+ * end of each idle, right before the next tube turns on. 0 = off (default).
+ * hold + pre must fit in the delay. Applied immediately if running. */
+const char *mux_set_pre(uint32_t pre_us);
+uint32_t    mux_get_pre(void);
 bool mux_running(void);
 
 /* Static cathode selection of one tube (mx on / mx off). */
