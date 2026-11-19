@@ -167,6 +167,7 @@ number in a cathode list is a digit, so `5` means `K5` and `0-9` means `K0-K9`.
 |---|---|
 | `mxa <freq> <duty1> <duty2> <delay>` | start multiplexing (or retune it while it runs) |
 | `mxa off` | stop multiplexing. The tube selections are kept |
+| `mxhold [time]` | how long the cathodes stay on after the anode goes off (default 100 µs, `0` = none, must be ≤ delay). Without an argument it shows the current value |
 | `mx on <anode> <cathodes>` | switch cathode(s) on for that tube |
 | `mx off <anode> <cathodes>` | switch cathode(s) off for that tube |
 | `mx off <anode>` | blank the tube (also stops its `mxrr`) |
@@ -182,20 +183,34 @@ One period (`1/freq`) is split into four parts:
 | duty1 % * period |       | duty2 % * period |                           |
 ```
 
-* At the start of a tube's on time, the firmware first leaves only that
-  tube's selected cathodes on (all others off), then switches its anode on.
-* At the end of the on time, it switches the anode off first, then switches
-  **all** cathodes on.
-* So during `delay` and the rest of the period, all anodes are off and all
-  cathodes are on (pulled to ground). Residual charge on the anodes that are
-  off can drain through the tubes instead of lighting the next tube's digit
-  as a ghost. The next anode turns on only after the delay.
-* When multiplexing starts, retunes or stops, everything is switched off:
-  first the anodes, then the cathodes.
+The **idle** state is all anodes off and all cathodes off.
+
+* **Idle → tube on:** switch on that tube's cathodes (if any are selected),
+  then switch on its anode.
+* **Tube on → idle:** switch off the anode, wait the cathode hold time
+  (`mxhold`, default 100 µs), then switch off all cathodes.
+* So the cathodes of the tube that just went dark stay grounded for the hold
+  time while its anode discharges. The rest of the delay is idle. The next
+  tube's cathodes and anode switch on only after the full delay.
+
+```
+        anode off       hold        idle (all off)        next tube
+A0  ‾‾‾‾‾\________________________________________________________
+K   ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\______________________________/‾‾‾‾‾‾‾‾‾  (K of next tube)
+A1  _______________________________________________________/‾‾‾‾‾
+         |<--- hold --->|<-------- delay - hold -------->|
+         |<------------------- delay ------------------->|
+```
+
+* The hold is part of the delay, so `mxa` and `mxhold` refuse a hold longer
+  than the delay. A hold of `0` switches the cathodes off together with the
+  anode. `mxhold` applies immediately while multiplexing runs.
+* Starting, retuning and stopping (`mxa`, `mxa off`, `alloff`) use the same
+  steps: anodes off, hold, cathodes off.
 * `mxa` checks that `duty1 + duty2 + 2 * delay / period <= 100 %`. It counts
   the delay twice because there are two anode changes per period. It also
-  checks that every non-zero part is at least 20 µs long, and that the
-  frequency is between 0.1 Hz and 12.5 kHz.
+  checks that every non-zero part is at least 20 µs long, including the hold
+  and `delay - hold`, and that the frequency is between 0.1 Hz and 12.5 kHz.
 * A duty of `0` keeps that tube dark.
 * The anodes are pulsed even when no cathode is selected, so you can check the
   anode waveform on a scope.
@@ -209,10 +224,11 @@ microseconds of jitter on the edges.
 ```
 nixie> mx on 0 5               # tube 0 will show 5
 nixie> mx on 1 7               # tube 1 will show 7
-nixie> mxa 200 40 40 100us     # 200 Hz: A0 2 ms, 100 us dark, A1 2 ms, 900 us dark
+nixie> mxa 200 40 40 300us     # 200 Hz: A0 2 ms, 300 us gap, A1 2 ms, 700 us gap
+nixie> mxhold 150us            # cathodes stay on 150 us after each anode off
 nixie> mxrr 1 0-9 1s           # tube 1 counts 0..9, tube 0 keeps showing 5
 nixie> mxrr 0 9-0 500 100 2    # tube 0 counts down twice, then goes blank
-nixie> mxa 1k 45 45 100us      # retune on the fly, digits keep running
+nixie> mxa 1k 40 40 200us      # retune on the fly, digits keep running
 nixie> status                  # shows timing and what each tube is doing
 nixie> mxa off                 # stop, or alloff to stop and forget everything
 ```
