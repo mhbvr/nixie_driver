@@ -104,6 +104,7 @@ the boot ROM drive.
 |---|---|
 | `help` / `?` | help with examples |
 | `pins` | list configured pins |
+| `gpio [pins]` | read the real pin registers and show whether each pin is driven LOW/HIGH, PWM or HIGH-Z |
 | `status` / `st` | state of every pin (off / ON / PWM / RR) |
 | `on <pins> ...` | switch on |
 | `off <pins> ...` | switch off |
