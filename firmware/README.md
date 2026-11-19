@@ -23,7 +23,10 @@ ever driven. Current board:
 | K9      | GP7       | digit 9                                |
 | K8      | GP8       | digit 8                                |
 | K1..K7  | GP9..GP15 | digits 1..7                            |
-| A0      | GP18      | anode optocoupler                      |
+| A0      | GP18      | anode optocoupler, tube 0              |
+| A1      | GP17      | anode optocoupler, tube 1              |
+
+Both tubes share the cathodes K0..K9. Each tube has its own anode.
 
 Each pin has an `active_low` flag. `false` (the default) means GPIO high
 switches the element ON, which matches GPIO → resistor → MPSA42 base, or GPIO
@@ -152,3 +155,73 @@ nixie> status
   frequency. They can still have different duties. If you set a different frequency on
   the second pin, the firmware prints a warning and both pins use the new
   frequency.
+
+## Multiplexing (two tubes, shared cathodes)
+
+The multiplexing commands add to the commands above; those work as before.
+In the mx commands the anode can be written `0` / `1` or `A0` / `A1`. A bare
+number in a cathode list is a digit, so `5` means `K5` and `0-9` means `K0-K9`.
+
+| Command | Description |
+|---|---|
+| `mxa <freq> <duty1> <duty2> <delay>` | start multiplexing (or retune it while it runs) |
+| `mxa off` | stop multiplexing. The tube selections are kept |
+| `mx on <anode> <cathodes>` | switch cathode(s) on for that tube |
+| `mx off <anode> <cathodes>` | switch cathode(s) off for that tube |
+| `mx off <anode>` | blank the tube (also stops its `mxrr`) |
+| `mxrr <anode> <cathodes> <on> [off] [cycles]` | round robin of cathodes on one tube |
+| `mxrr <anode> stop` | stop that tube's round robin |
+
+### Timing
+
+One period (`1/freq`) is split into four parts:
+
+```
+| A0 on            | delay | A1 on            | rest of period (>= delay) |
+| duty1 % * period |       | duty2 % * period |                           |
+```
+
+* At the start of a tube's on time, the firmware switches on that tube's
+  cathodes first, then its anode.
+* At the end of the on time, it switches the anode off first, then all
+  cathodes.
+* During `delay` everything is dark, so a cathode never changes while an anode
+  is on. This prevents ghosting. Make `delay` long enough for the
+  optocouplers to switch off.
+* `mxa` checks that `duty1 + duty2 + 2 * delay / period <= 100 %`. It counts
+  the delay twice because there are two anode changes per period. It also
+  checks that every non-zero part is at least 20 µs long, and that the
+  frequency is between 0.1 Hz and 12.5 kHz.
+* A duty of `0` keeps that tube dark.
+* The anodes are pulsed even when no cathode is selected, so you can check the
+  anode waveform on a scope.
+
+The anodes are switched by a timer interrupt, not by hardware PWM. That way the
+cathodes and anodes always change in the right order. Expect a few
+microseconds of jitter on the edges.
+
+### Example
+
+```
+nixie> mx on 0 5               # tube 0 will show 5
+nixie> mx on 1 7               # tube 1 will show 7
+nixie> mxa 200 40 40 100us     # 200 Hz: A0 2 ms, 100 us dark, A1 2 ms, 900 us dark
+nixie> mxrr 1 0-9 1s           # tube 1 counts 0..9, tube 0 keeps showing 5
+nixie> mxrr 0 9-0 500 100 2    # tube 0 counts down twice, then goes blank
+nixie> mxa 1k 45 45 100us      # retune on the fly, digits keep running
+nixie> status                  # shows timing and what each tube is doing
+nixie> mxa off                 # stop, or alloff to stop and forget everything
+```
+
+Rules:
+
+* While multiplexing runs, it owns K0..K9, A0 and A1. `on`, `off`, `pwm` and
+  `rr` on those pins are refused until you run `mxa off` or `alloff`.
+* `mxa` stops a running `rr` that uses any of these pins.
+* `mx on` and `mx off` with cathodes are refused while that tube runs `mxrr`.
+  Run `mxrr <anode> stop` or `mx off <anode>` first.
+* `mx` and `mxrr` can be set up before `mxa` starts. They take effect as soon
+  as multiplexing runs.
+* `alloff` and Ctrl-C stop multiplexing and clear both tubes.
+* The `mxrr` on time should be longer than one multiplexing period, or some
+  digits will be skipped.
