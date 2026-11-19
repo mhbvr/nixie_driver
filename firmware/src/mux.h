@@ -6,12 +6,12 @@
  *   | tube 0 on      | gap   | tube 1 on      | gap (rest of period)  |
  *   | duty1 * period | delay | duty2 * period | >= delay              |
  *
- * At the start of a "tube on" segment the cathodes are set to only the ones
- * selected for that tube, then its anode is switched on. At the start of a gap
- * the anode is switched off first, then ALL cathodes are switched on. During
- * every gap all anodes are off and all cathodes are on, which drains the
- * residual charge of the anodes (anti-ghosting).
- * Starting, retuning and stopping switch everything off: anodes, then cathodes.
+ * Idle state: all anodes off, all cathodes off.
+ *   idle -> tube on:  switch on the tube's cathodes (if any), then its anode.
+ *   tube on -> idle:  switch off the anode, wait the cathode hold time
+ *                     (mxhold, default 100 us), then switch off all cathodes.
+ * The hold is part of the delay, so hold <= delay. Starting, retuning and
+ * stopping go through the same steps (anodes off, hold, cathodes off).
  * Validity: duty1 + duty2 + 2 * delay / period <= 100 %.
  *
  * Each tube shows either a static set of cathodes (mx on / mx off) or its
@@ -24,6 +24,7 @@
 #include <stdint.h>
 
 #define MX_TUBES 2
+#define MX_DEFAULT_HOLD_US 100   /* cathodes stay on after anode off */
 
 /* Find the anodes/cathodes in the pin table. Call once after out_init(). */
 void mux_init(void);
@@ -39,6 +40,11 @@ bool mux_is_cathode(int idx);
 const char *mux_start(double freq_hz, double duty1_pct, double duty2_pct,
                       uint32_t delay_us);
 bool mux_stop(void);              /* true if it was running; selections kept */
+
+/* Time the cathodes stay on after the anode is switched off (0 = none).
+ * Applied immediately if multiplexing runs; must not exceed the delay. */
+const char *mux_set_hold(uint32_t hold_us);
+uint32_t    mux_get_hold(void);
 bool mux_running(void);
 
 /* Static cathode selection of one tube (mx on / mx off). */

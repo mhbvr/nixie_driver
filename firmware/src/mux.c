@@ -12,6 +12,7 @@
 #define MX_MAX_CATH    32
 #define MX_MIN_SEG_US  RR_MIN_US      /* shortest non-zero segment          */
 #define MX_MAX_PERIOD  10000000u      /* 10 s, i.e. freq >= 0.1 Hz          */
+#define MX_MAX_HOLD_US 100000u        /* 100 ms                             */
 
 /* ------------------------------------------------------------------------ */
 /* Configuration (from the pin table)                                       */
@@ -24,7 +25,6 @@ static int       g_ncath;
 static uint32_t  g_cath_gpio_bit[MX_MAX_CATH];
 static uint32_t  g_cath_gpio_mask;           /* all cathode GPIOs           */
 static uint32_t  g_cath_idle;                /* their levels, all off       */
-static uint32_t  g_cath_all_on;              /* their levels, all on        */
 
 /* ------------------------------------------------------------------------ */
 /* State shared with the alarm IRQ                                          */
@@ -47,13 +47,18 @@ static tube_t g_tube[MX_TUBES];
 static struct {
     volatile bool running;
     alarm_id_t    alarm;
-    uint32_t      dur[4];            /* on0, gap0, on1, gap1 in us */
-    volatile int  seg;               /* segment to start next      */
+    uint32_t      dur[4];            /* on0, gap0, on1, gap1 in us       */
+    uint32_t      seg_us[6];         /* on0, hold, idle0, on1, hold, idle1 */
+    volatile int  seg;               /* segment to start next            */
     uint32_t      period_us;
-    double        freq;
+    double        freq;              /* actual                           */
+    double        freq_req;          /* as requested, for retuning       */
     double        duty[MX_TUBES];
     uint32_t      delay_us;
 } mx;
+
+/* Cathodes stay on this long after the anode is switched off. */
+static uint32_t g_hold_us = MX_DEFAULT_HOLD_US;
 
 /* ------------------------------------------------------------------------ */
 /* Init / lookup                                                            */
@@ -92,7 +97,6 @@ void mux_init(void)
         g_init_err = "multiplexing needs cathode pins in pins_config.h";
         return;
     }
-    g_cath_all_on = g_cath_idle ^ g_cath_gpio_mask;
     g_init_err = NULL;
 }
 
@@ -161,19 +165,27 @@ static void tube_light(int t)
     for (int i = 0; i < g_ncath; i++)
         if (m & (1u << i))
             val ^= g_cath_gpio_bit[i];          /* active level = !idle */
-    gpio_put_masked(g_cath_gpio_mask, val);     /* only this tube's cathodes ... */
-    out_drive(g_anode[t], true);                /* ... then the anode            */
+    gpio_put_masked(g_cath_gpio_mask, val);     /* cathodes (if any) first ... */
+    out_drive(g_anode[t], true);                /* ... then the anode          */
 }
 
-/* Gap: anode off, then ALL cathodes on, so the residual charge on the anodes
- * that are off drains through the tubes instead of lighting a ghost digit. */
-static void tube_dark(int t)
+/* Tube -> idle, step 1: anode off. The cathodes stay as they are for the
+ * hold time, so the anode's residual charge drains through the same digit. */
+static void tube_anode_off(int t)
 {
-    out_drive(g_anode[t], false);                   /* anode off first ... */
-    gpio_put_masked(g_cath_gpio_mask, g_cath_all_on); /* ... then all cathodes on */
+    out_drive(g_anode[t], false);
 }
 
-/* Segment s starts now: 0 = tube 0 on, 1 = gap, 2 = tube 1 on, 3 = gap.
+/* Tube -> idle, step 2 (after the hold time): all cathodes off = idle. */
+static void cathodes_off(void)
+{
+    gpio_put_masked(g_cath_gpio_mask, g_cath_idle);
+}
+
+/* Segment s starts now:
+ *   0 = tube 0 on (cathodes, then anode)   3 = tube 1 on
+ *   1 = tube 0 anode off, hold starts      4 = tube 1 anode off, hold starts
+ *   2 = all cathodes off (idle)            5 = all cathodes off (idle)
  * Zero-length segments are applied and skipped in the same call. A negative
  * return value reschedules relative to the previous target (no drift). */
 static int64_t mx_alarm_cb(alarm_id_t id, void *user_data)
@@ -184,18 +196,24 @@ static int64_t mx_alarm_cb(alarm_id_t id, void *user_data)
     if (!mx.running)
         return 0;
 
-    for (int guard = 0; guard < 4; guard++) {
+    for (int guard = 0; guard < 6; guard++) {
         int      s = mx.seg;
-        uint32_t d = mx.dur[s];
-        int      t = s >> 1;
+        uint32_t d = mx.seg_us[s];
+        int      t = s / 3;
 
-        if ((s & 1) == 0) {
+        switch (s % 3) {
+        case 0:
             if (d)
                 tube_light(t);
-        } else {
-            tube_dark(t);
+            break;
+        case 1:
+            tube_anode_off(t);
+            break;
+        default:
+            cathodes_off();
+            break;
         }
-        mx.seg = (s + 1) & 3;
+        mx.seg = s == 5 ? 0 : s + 1;
         if (d)
             return -(int64_t)d;
     }
@@ -217,9 +235,15 @@ static void mx_cancel(void)
 /* Everything off (start/retune/stop): anodes first, then the cathodes. */
 static void all_dark(void)
 {
-    for (int t = 0; t < MX_TUBES; t++)
-        out_drive(g_anode[t], false);
-    gpio_put_masked(g_cath_gpio_mask, g_cath_idle);
+    bool was_lit = false;
+    for (int t = 0; t < MX_TUBES; t++) {
+        was_lit |= out_get_mode(g_anode[t]) != OUT_MODE_OFF &&
+                   gpio_get_out_level(PIN_TABLE[g_anode[t]].gpio) != PIN_TABLE[g_anode[t]].active_low;
+        out_drive(g_anode[t], false);           /* anodes off ...             */
+    }
+    if (was_lit && g_hold_us)
+        busy_wait_us_32(g_hold_us);             /* ... same hold as in the ISR */
+    gpio_put_masked(g_cath_gpio_mask, g_cath_idle);   /* ... then cathodes  */
 }
 
 const char *mux_start(double freq_hz, double duty1_pct, double duty2_pct,
@@ -266,13 +290,29 @@ const char *mux_start(double freq_hz, double duty1_pct, double duty2_pct,
     dur[2] = on1;
     dur[3] = p - on0 - delay_us - on1;          /* >= delay_us */
 
-    static const char *seg_name[4] = { "tube 0 on time", "delay", "tube 1 on time",
-                                       "second gap" };
-    for (int s = 0; s < 4; s++) {
-        if (dur[s] != 0 && dur[s] < MX_MIN_SEG_US) {
+    if (g_hold_us > delay_us) {
+        snprintf(msg, sizeof msg,
+                 "cathode hold (%lu us) is longer than the delay (%lu us): "
+                 "use a longer delay or a shorter 'mxhold'",
+                 (unsigned long)g_hold_us, (unsigned long)delay_us);
+        return msg;
+    }
+    uint32_t seg[6];
+    seg[0] = dur[0];
+    seg[1] = g_hold_us;
+    seg[2] = dur[1] - g_hold_us;
+    seg[3] = dur[2];
+    seg[4] = g_hold_us;
+    seg[5] = dur[3] - g_hold_us;               /* dur[3] >= delay >= hold */
+
+    static const char *seg_name[6] = { "tube 0 on time", "cathode hold", "delay - hold",
+                                       "tube 1 on time", "cathode hold",
+                                       "second gap - hold" };
+    for (int s = 0; s < 6; s++) {
+        if (seg[s] != 0 && seg[s] < MX_MIN_SEG_US) {
             snprintf(msg, sizeof msg,
                      "%s is %lu us, min %d us (use 0, a longer time or a lower frequency)",
-                     seg_name[s], (unsigned long)dur[s], MX_MIN_SEG_US);
+                     seg_name[s], (unsigned long)seg[s], MX_MIN_SEG_US);
             return msg;
         }
     }
@@ -297,8 +337,11 @@ const char *mux_start(double freq_hz, double duty1_pct, double duty2_pct,
 
     for (int s = 0; s < 4; s++)
         mx.dur[s] = dur[s];
+    for (int s = 0; s < 6; s++)
+        mx.seg_us[s] = seg[s];
     mx.period_us = p;
     mx.freq      = 1e6 / (double)p;
+    mx.freq_req  = freq_hz;
     mx.duty[0]   = duty1_pct;
     mx.duty[1]   = duty2_pct;
     mx.delay_us  = delay_us;
@@ -316,6 +359,29 @@ const char *mux_start(double freq_hz, double duty1_pct, double duty2_pct,
     }
     if (rr_stopped)
         printf("note: round robin stopped, its pins are used by multiplexing now\n");
+    return NULL;
+}
+
+uint32_t mux_get_hold(void)
+{
+    return g_hold_us;
+}
+
+const char *mux_set_hold(uint32_t hold_us)
+{
+    if (hold_us != 0 && hold_us < MX_MIN_SEG_US)
+        return "hold must be 0 or at least 20 us";
+    if (hold_us > MX_MAX_HOLD_US)
+        return "hold must be at most 100 ms";
+    uint32_t old = g_hold_us;
+    g_hold_us = hold_us;
+    if (mx.running) {
+        const char *err = mux_start(mx.freq_req, mx.duty[0], mx.duty[1], mx.delay_us);
+        if (err) {
+            g_hold_us = old;            /* keep running with the old value */
+            return err;
+        }
+    }
     return NULL;
 }
 
@@ -451,7 +517,7 @@ unsigned mux_poll(void)
 void mux_print_timing(void)
 {
     if (!mx.running) {
-        printf("multiplexing: off\n");
+        printf("multiplexing: off (cathode hold %lu us)\n", (unsigned long)g_hold_us);
         return;
     }
     printf("multiplexing: %.3f Hz, period %lu us\n", mx.freq, (unsigned long)mx.period_us);
@@ -460,6 +526,8 @@ void mux_print_timing(void)
            (unsigned long)mx.dur[1],
            PIN_TABLE[g_anode[1]].name, (unsigned long)mx.dur[2], mx.duty[1],
            (unsigned long)mx.dur[3]);
+    printf("  cathodes stay on %lu us after each anode off, then all off (mxhold)\n",
+           (unsigned long)g_hold_us);
 }
 
 static void print_time(uint32_t us)

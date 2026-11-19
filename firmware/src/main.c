@@ -16,6 +16,8 @@
 #include "mux.h"
 #include "outputs.h"
 #include "pico/stdio_usb.h"
+#include "hardware/structs/io_bank0.h"
+#include "hardware/structs/pads_bank0.h"
 #include "pico/stdlib.h"
 #include "pins_config.h"
 
@@ -507,6 +509,29 @@ static void cmd_mxa(int argc, char **argv)
     mux_print_timing();
 }
 
+/* mxhold [time]: cathode hold after anode off */
+static void cmd_mxhold(int argc, char **argv)
+{
+    if (argc == 1) {
+        printf("cathode hold after anode off: %lu us\n", (unsigned long)mux_get_hold());
+        return;
+    }
+    uint32_t us;
+    if (argc != 2 || !parse_duration_us(argv[1], &us, true)) {
+        printf("usage: mxhold [time]   e.g. mxhold 100us, mxhold 0 (default %d us)\n",
+               MX_DEFAULT_HOLD_US);
+        return;
+    }
+    const char *err = mux_set_hold(us);
+    if (err) {
+        printf("error: %s\n", err);
+        return;
+    }
+    printf("cathode hold after anode off: %lu us\n", (unsigned long)us);
+    if (mux_running())
+        mux_print_timing();
+}
+
 /* mx on <anode> <cathodes>   |   mx off <anode> [cathodes] */
 static void cmd_mx(int argc, char **argv)
 {
@@ -608,6 +633,80 @@ static void cmd_status(int argc, char **argv)
     mux_print_status();
 }
 
+/* gpio [pins]: read the real IO/pad registers of each pin and report whether
+ * the chip actually drives it or leaves it high-Z. Read-only. */
+static void cmd_gpio(int argc, char **argv)
+{
+    int idx[RR_MAX_STEPS], n = 0;
+    if (argc >= 2) {
+        for (int a = 1; a < argc; a++) {
+            const char *err = parse_pin_list(argv[a], idx, RR_MAX_STEPS, &n);
+            if (err) {
+                printf("error: %s\n", err);
+                return;
+            }
+        }
+    } else {
+        for (int i = 0; i < PIN_COUNT && n < RR_MAX_STEPS; i++)
+            idx[n++] = i;
+    }
+
+    static const uint8_t drive_ma[4] = { 2, 4, 8, 12 };
+    printf("  %-6s %-4s %-4s %-2s %-3s %-3s %-3s %-3s %-3s %-4s %-5s %s\n", "name", "gpio",
+           "func", "oe", "out", "pin", "od", "ie", "iso", "pull", "drive", "-> state");
+
+    for (int k = 0; k < n; k++) {
+        const pin_def_t *p = &PIN_TABLE[idx[k]];
+        uint     g      = p->gpio;
+        uint32_t ctrl   = io_bank0_hw->io[g].ctrl;
+        uint32_t pad    = pads_bank0_hw->io[g];
+        uint     func   = (ctrl & IO_BANK0_GPIO0_CTRL_FUNCSEL_BITS) >> IO_BANK0_GPIO0_CTRL_FUNCSEL_LSB;
+        uint     oeover = (ctrl & IO_BANK0_GPIO0_CTRL_OEOVER_BITS) >> IO_BANK0_GPIO0_CTRL_OEOVER_LSB;
+        uint     outover = (ctrl & IO_BANK0_GPIO0_CTRL_OUTOVER_BITS) >> IO_BANK0_GPIO0_CTRL_OUTOVER_LSB;
+        bool     sio_oe = gpio_is_dir_out(g);
+        bool     sio_out = gpio_get_out_level(g);
+        bool     pin    = gpio_get(g);            /* real pin level (input buffer) */
+        bool     od     = pad & PADS_BANK0_GPIO0_OD_BITS;
+        bool     ie     = pad & PADS_BANK0_GPIO0_IE_BITS;
+#ifdef PADS_BANK0_GPIO0_ISO_BITS
+        bool     iso    = pad & PADS_BANK0_GPIO0_ISO_BITS;
+#else
+        bool     iso    = false;                  /* RP2040 has no pad isolation */
+#endif
+        bool     pue    = pad & PADS_BANK0_GPIO0_PUE_BITS;
+        bool     pde    = pad & PADS_BANK0_GPIO0_PDE_BITS;
+        uint     drive  = (pad & PADS_BANK0_GPIO0_DRIVE_BITS) >> PADS_BANK0_GPIO0_DRIVE_LSB;
+
+        const char *fname = func == GPIO_FUNC_SIO ? "SIO" : func == GPIO_FUNC_PWM ? "PWM"
+                          : func == GPIO_FUNC_NULL ? "NULL" : "?";
+
+        /* Effective output enable: peripheral OE (SIO: direction bit, PWM: always
+         * on) after the OE override (0 normal, 1 invert, 2 off, 3 on). */
+        int periph_oe = func == GPIO_FUNC_SIO ? sio_oe : func == GPIO_FUNC_PWM ? 1 : 0;
+        bool oe = oeover == 3 ? true : oeover == 2 ? false : oeover == 1 ? !periph_oe : periph_oe;
+
+        printf("  %-6s GP%-2u %-4s %-2d %-3d %-3d %-3d %-3d %-3d %-4s %2umA  -> ", p->name, g, fname,
+               (int)oe, (int)sio_out, (int)pin, (int)od, (int)ie, (int)iso,
+               pue && pde ? "both" : pue ? "up" : pde ? "down" : "none", drive_ma[drive]);
+
+        if (od || iso || !oe) {
+            printf("HIGH-Z (%s), pin reads %s\n",
+                   od ? "pad output disabled" : iso ? "pad isolated" : "not an output",
+                   pin ? "HIGH" : "LOW");
+        } else if (func == GPIO_FUNC_PWM) {
+            printf("driven by PWM\n");
+        } else {
+            bool level = outover == 3 ? true : outover == 2 ? false
+                       : outover == 1 ? !sio_out : sio_out;
+            bool elem_on = level != p->active_low;
+            printf("driven %s (%s)", level ? "HIGH" : "LOW", elem_on ? "element ON" : "element off");
+            if (pin != level)
+                printf("  !! pin reads %s - overloaded or shorted?", pin ? "HIGH" : "LOW");
+            printf("\n");
+        }
+    }
+}
+
 static void cmd_pins(int argc, char **argv)
 {
     (void)argc;
@@ -626,6 +725,7 @@ typedef struct {
 static const cmd_t COMMANDS[] = {
     { "help",   "?",    cmd_help,   "",                               "show this help" },
     { "pins",   NULL,   cmd_pins,   "",                               "list configured pins" },
+    { "gpio",   NULL,   cmd_gpio,   "[pins]",                         "read pin registers: driven or high-Z" },
     { "status", "st",   cmd_status, "",                               "show state of every pin" },
     { "on",     NULL,   cmd_on,     "<pins> [<pins>...]",             "switch pin(s) on" },
     { "off",    NULL,   cmd_off,    "<pins> [<pins>...]",             "switch pin(s) off" },
@@ -634,6 +734,7 @@ static const cmd_t COMMANDS[] = {
     { "pwm",    NULL,   cmd_pwm,    "<pins> <freq> <duty> | <pins> off", "hardware PWM" },
     { "rr",     NULL,   cmd_rr,     "<pins> <on> [off] [cycles] | stop", "round robin" },
     { "mxa",    NULL,   cmd_mxa,    "<freq> <duty1> <duty2> <delay> | off", "multiplex the 2 anodes" },
+    { "mxhold", NULL,   cmd_mxhold, "[time]",                         "cathode hold after anode off" },
     { "mx",     NULL,   cmd_mx,     "on|off <anode> <cathodes>",       "cathodes of a tube (mux)" },
     { "mxrr",   NULL,   cmd_mxrr,   "<anode> <cathodes> <on> [off] [cyc]", "round robin on a tube (mux)" },
 };
@@ -669,7 +770,9 @@ static void cmd_help(int argc, char **argv)
            "\n"
            "multiplexing (2 tubes, shared cathodes; anode = 0/1 or A0/A1, bare number = digit):\n"
            "  mxa 200 40 40 100us  A0 40 %%, 100 us gap, A1 40 %%, rest gap; 200 Hz\n"
-           "                       gap = all anodes off, all cathodes on (anti-ghosting)\n"
+           "                       on: cathodes then anode; off: anode, hold, cathodes\n"
+           "  mxhold 50us          cathodes stay on 50 us after anode off (default 100 us,\n"
+           "                       must be <= delay)\n"
            "                       rule: duty1 + duty2 + 2*delay/period <= 100 %%\n"
            "  mx on 0 5            show 5 on tube 0          mx off 0 5 / mx off 0\n"
            "  mx on A1 K7          show 7 on tube 1\n"
